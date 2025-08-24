@@ -72,12 +72,13 @@ def ADX(df, period=14):
     low = df['Low']
     close = df['Close']
     
-    # True Range
-    tr = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs()
-    ], axis=1).max(axis=1)
+    # True Range - ensure we get a Series
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    
+    # Use numpy maximum instead of pd.concat to avoid DataFrame issues
+    tr = np.maximum(tr1, np.maximum(tr2, tr3))
     
     # Directional Movement
     up_move = high - high.shift(1)
@@ -86,10 +87,13 @@ def ADX(df, period=14):
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
     
-    # Smooth the values
+    # Smooth the values - ensure tr is a Series
+    if isinstance(tr, np.ndarray):
+        tr = pd.Series(tr, index=high.index)
+    
     tr_smooth = tr.rolling(window=period).mean()
-    plus_di = 100 * pd.Series(plus_dm).rolling(window=period).mean() / tr_smooth
-    minus_di = 100 * pd.Series(minus_dm).rolling(window=period).mean() / tr_smooth
+    plus_di = 100 * pd.Series(plus_dm, index=high.index).rolling(window=period).mean() / tr_smooth
+    minus_di = 100 * pd.Series(minus_dm, index=high.index).rolling(window=period).mean() / tr_smooth
     
     # Calculate ADX
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
@@ -114,8 +118,13 @@ def Trend_Strength(df, period=14):
     rsi = RSI(df['Close'], period)
     rsi_trend = (rsi > 50).astype(int)
     
-    # Combine all factors
+    # Combine all factors - ensure we get a Series
     trend_strength = (price_momentum + volume_trend + ma_alignment + rsi_trend) / 4
+    
+    # Ensure we return a Series
+    if isinstance(trend_strength, pd.DataFrame):
+        trend_strength = trend_strength.iloc[:, 0]
+    
     return trend_strength * 100  # Scale to 0-100
 
 # -------------------------

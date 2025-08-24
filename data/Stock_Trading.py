@@ -32,6 +32,26 @@ def get_timeframe_parameters(interval):
 
 #add indicators to the stock
 def add_indicators(stock,period):
+    # Debug: Check data structure
+    print(f"Stock columns: {stock.columns.tolist()}")
+    print(f"Stock shape: {stock.shape}")
+    
+    # Handle MultiIndex columns from yfinance
+    if isinstance(stock.columns, pd.MultiIndex):
+        print("MultiIndex DataFrame detected - flattening columns")
+        # Get the original column names from the first level
+        original_cols = [col[0] for col in stock.columns]
+        print(f"Original column names: {original_cols}")
+        
+        # Rename columns to avoid duplicates
+        stock.columns = original_cols
+        print(f"Renamed columns: {stock.columns.tolist()}")
+    
+    print(f"Volume type: {type(stock['Volume'])}")
+    if isinstance(stock['Volume'], pd.DataFrame):
+        print(f"Volume DataFrame shape: {stock['Volume'].shape}")
+        print(f"Volume DataFrame columns: {stock['Volume'].columns.tolist()}")
+    
     # Multiple SMAs for trend analysis
     stock['SMA5']=ind.SMA(stock['Close'],5)
     stock['SMA10']=ind.SMA(stock['Close'],10)
@@ -56,19 +76,34 @@ def add_indicators(stock,period):
     stock['MACD_Histogram']=histogram
     
     # Volatility indicators
-    stock['ATR']=ind.ATR(stock,period)
+    stock['ATR']=ind.ATR(stock, period)
     bb_upper, bb_lower = ind.Bollinger_Bands(stock['Close'], 20, 2)
     stock['BB_Upper'] = bb_upper
     stock['BB_Lower'] = bb_lower
     stock['BB_Middle'] = ind.SMA(stock['Close'], 20)
     
-    # Volume indicators
-    stock['Volume_SMA'] = stock['Volume'].rolling(20).mean()
-    stock['Volume_Ratio'] = stock['Volume'] / stock['Volume_SMA']
+    # Volume indicators - ensure these are Series, not DataFrames
+    # Check if Volume is a DataFrame or Series and handle accordingly
+    if isinstance(stock['Volume'], pd.DataFrame):
+        volume_data = stock['Volume'].iloc[:, 0]  # Take first column if DataFrame
+    else:
+        volume_data = stock['Volume']
     
-    # Trend strength indicators
-    stock['ADX'] = ind.ADX(stock, period)
-    stock['Trend_Strength'] = ind.Trend_Strength(stock, period)
+    stock['Volume_SMA'] = volume_data.rolling(20).mean()
+    stock['Volume_Ratio'] = volume_data / stock['Volume_SMA']
+    
+    # Trend strength indicators - ensure they return Series
+    adx_result = ind.ADX(stock, period)
+    if isinstance(adx_result, pd.DataFrame):
+        stock['ADX'] = adx_result.iloc[:, 0]
+    else:
+        stock['ADX'] = adx_result
+        
+    trend_strength_result = ind.Trend_Strength(stock, period)
+    if isinstance(trend_strength_result, pd.DataFrame):
+        stock['Trend_Strength'] = trend_strength_result.iloc[:, 0]
+    else:
+        stock['Trend_Strength'] = trend_strength_result
     
     return stock
 
@@ -183,33 +218,12 @@ def buy_sell_signals(stock):
         (stock['MACD'] < stock['MACD_Signal']) # MACD bearish
     )
     
-    # Create different signal strictness levels
-    # Conservative signals (high accuracy, fewer signals)
-    conservative_buy = buy_signal & (stock['Signal_Strength'] >= 80)
-    conservative_sell = sell_signal & (stock['Signal_Strength'] >= 80)
-    
-    # Moderate signals (balanced accuracy and frequency)
-    moderate_buy = buy_signal & (stock['Signal_Strength'] >= 60)
-    moderate_sell = sell_signal & (stock['Signal_Strength'] >= 60)
-    
-    # Aggressive signals (more signals, lower accuracy)
-    aggressive_buy = buy_signal & (stock['Signal_Strength'] >= 40)
-    aggressive_sell = sell_signal & (stock['Signal_Strength'] >= 40)
-    
     # Assign signals to dataframe
     stock['Buy_Signal'] = buy_signal
     stock['Sell_Signal'] = sell_signal
     stock['Stop_Loss'] = stop_loss
     stock['Take_Profit'] = take_profit
     stock['Bearish_Signal'] = bearish_signal
-    
-    # Different strictness levels
-    stock['Conservative_Buy'] = conservative_buy
-    stock['Conservative_Sell'] = conservative_sell
-    stock['Moderate_Buy'] = moderate_buy
-    stock['Moderate_Sell'] = moderate_sell
-    stock['Aggressive_Buy'] = aggressive_buy
-    stock['Aggressive_Sell'] = aggressive_sell
     
     # Signal strength (0-100) - weighted by importance
     stock['Signal_Strength'] = (
@@ -222,6 +236,27 @@ def buy_sell_signals(stock):
         (bb_oversold.astype(int) * 8) +            # Bollinger Band support
         (price_momentum_up.astype(int) * 7)        # Price momentum
     )
+    
+    # Create different signal strictness levels AFTER Signal_Strength is created
+    # Conservative signals (high accuracy, fewer signals)
+    conservative_buy = buy_signal & (stock['Signal_Strength'] >= 80)
+    conservative_sell = sell_signal & (stock['Signal_Strength'] >= 80)
+    
+    # Moderate signals (balanced accuracy and frequency)
+    moderate_buy = buy_signal & (stock['Signal_Strength'] >= 60)
+    moderate_sell = sell_signal & (stock['Signal_Strength'] >= 60)
+    
+    # Aggressive signals (more signals, lower accuracy)
+    aggressive_buy = buy_signal & (stock['Signal_Strength'] >= 40)
+    aggressive_sell = sell_signal & (stock['Signal_Strength'] >= 40)
+    
+    # Different strictness levels
+    stock['Conservative_Buy'] = conservative_buy
+    stock['Conservative_Sell'] = conservative_sell
+    stock['Moderate_Buy'] = moderate_buy
+    stock['Moderate_Sell'] = moderate_sell
+    stock['Aggressive_Buy'] = aggressive_buy
+    stock['Aggressive_Sell'] = aggressive_sell
     
     return stock
 
@@ -271,39 +306,39 @@ latest_data = data_frame.iloc[-1]
 signal_found = False
 
 if latest_data['Conservative_Buy']:
-    print(f"\n🟢 CONSERVATIVE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n CONSERVATIVE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   High confidence entry - recommended for swing trading")
     signal_found = True
 elif latest_data['Moderate_Buy']:
-    print(f"\n🟢 MODERATE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n MODERATE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   Balanced confidence - good for day trading")
     signal_found = True
 elif latest_data['Aggressive_Buy']:
-    print(f"\n🟢 AGGRESSIVE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n AGGRESSIVE BUY SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   Lower confidence - use with tight stops")
     signal_found = True
 elif latest_data['Conservative_Sell']:
-    print(f"\n🔴 CONSERVATIVE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n CONSERVATIVE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   High confidence exit - recommended")
     signal_found = True
 elif latest_data['Moderate_Sell']:
-    print(f"\n🔴 MODERATE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n MODERATE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   Balanced confidence exit")
     signal_found = True
 elif latest_data['Aggressive_Sell']:
-    print(f"\n🔴 AGGRESSIVE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n AGGRESSIVE SELL SIGNAL - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     print("   Lower confidence exit - consider partial positions")
     signal_found = True
 
 if latest_data['Stop_Loss']:
-    print(f"\n⚠️  STOP LOSS TRIGGERED")
+    print(f"\n  STOP LOSS TRIGGERED")
     signal_found = True
 elif latest_data['Take_Profit']:
-    print(f"\n💰 TAKE PROFIT TRIGGERED")
+    print(f"\n TAKE PROFIT TRIGGERED")
     signal_found = True
 
 if not signal_found:
-    print(f"\n⚪ No active signals - Signal Strength: {latest_data['Signal_Strength']:.1f}")
+    print(f"\n No active signals - Signal Strength: {latest_data['Signal_Strength']:.1f}")
     if latest_data['Signal_Strength'] >= 70:
         print("   High signal strength - monitor for entry opportunities")
     elif latest_data['Signal_Strength'] >= 40:
